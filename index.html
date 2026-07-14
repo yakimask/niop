@@ -1,0 +1,810 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CADS — Continuous Acoustic Dimension System</title>
+  <meta name="description" content="GPSで動く連続空間音響変形システム。歩くだけで空間の音響特性が変化する。">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Outfit:wght@100;200;300;400&display=swap" rel="stylesheet">
+
+  <style>
+    :root {
+      --bg:       #060608;
+      --surface:  rgba(255,255,255,0.03);
+      --border:   rgba(255,255,255,0.06);
+      --text:     #c8c8e8;
+      --muted:    #44445a;
+      --accent:   #7766ff;
+      --accent2:  #ff6688;
+      --warp-col: #ff44aa;
+      --good:     #44ffaa;
+      --warn:     #ffaa44;
+      --bad:      #ff4444;
+    }
+    *, *::before, *::after { margin:0; padding:0; box-sizing:border-box; }
+    html, body { width:100%; height:100%; overflow:hidden; background:var(--bg); color:var(--text); font-family:'Space Mono',monospace; }
+
+    /* ══════════════════════════════════════
+       スタート画面
+    ══════════════════════════════════════ */
+    #start-screen {
+      position:fixed; inset:0;
+      display:flex; flex-direction:column; align-items:center; justify-content:center;
+      background: radial-gradient(ellipse 60% 60% at 50% 50%, #0d0a20, var(--bg));
+      z-index:100;
+      transition: opacity 1.2s ease;
+    }
+    #start-screen.fade-out { opacity:0; pointer-events:none; }
+
+    .start-title {
+      font-family:'Outfit',sans-serif;
+      font-weight:100;
+      font-size: clamp(1.6rem, 4vw, 2.8rem);
+      letter-spacing:0.25em;
+      color:#e0e0ff;
+      margin-bottom:0.3em;
+    }
+    .start-sub {
+      font-size:0.6rem;
+      letter-spacing:0.4em;
+      color:var(--muted);
+      text-transform:uppercase;
+      margin-bottom:3em;
+    }
+
+    .start-modes {
+      display:flex;
+      gap:16px;
+      margin-bottom:2.5em;
+    }
+
+    .mode-card {
+      border:1px solid var(--border);
+      padding:20px 28px;
+      cursor:pointer;
+      position:relative;
+      overflow:hidden;
+      transition:all 0.3s ease;
+      background:var(--surface);
+      min-width:180px;
+      text-align:center;
+    }
+    .mode-card::before {
+      content:'';
+      position:absolute;
+      inset:0;
+      opacity:0;
+      transition:opacity 0.3s;
+    }
+    .mode-card.gps::before  { background:rgba(119,102,255,0.12); }
+    .mode-card.virt::before { background:rgba(255,102,136,0.12); }
+    .mode-card:hover::before { opacity:1; }
+    .mode-card:hover { border-color:rgba(255,255,255,0.18); }
+    .mode-card:hover .mode-icon { transform:scale(1.15); }
+
+    .mode-icon  { font-size:2rem; margin-bottom:0.6em; display:block; transition:transform 0.3s; }
+    .mode-label { font-size:0.65rem; letter-spacing:0.25em; color:var(--text); display:block; margin-bottom:0.3em; }
+    .mode-desc  { font-size:0.55rem; color:var(--muted); line-height:1.7; }
+
+    .start-note {
+      font-size:0.55rem;
+      color:var(--muted);
+      letter-spacing:0.1em;
+      line-height:1.8;
+      text-align:center;
+      max-width:420px;
+    }
+
+    /* ══════════════════════════════════════
+       メイン画面
+    ══════════════════════════════════════ */
+    #main {
+      position:fixed; inset:0;
+      display:none;
+      flex-direction:column;
+    }
+    #main.active { display:flex; }
+
+    /* ── 左パネル: SpaceFieldパラメーター ── */
+    #panel-left {
+      position:fixed;
+      top:0; left:0;
+      width:260px;
+      height:100vh;
+      padding:24px 20px;
+      background:linear-gradient(to right, rgba(6,6,8,0.95), rgba(6,6,8,0.6));
+      border-right:1px solid var(--border);
+      display:flex;
+      flex-direction:column;
+      gap:0;
+      overflow:hidden;
+    }
+
+    .panel-title {
+      font-size:0.55rem;
+      letter-spacing:0.35em;
+      color:var(--muted);
+      text-transform:uppercase;
+      margin-bottom:20px;
+      padding-bottom:12px;
+      border-bottom:1px solid var(--border);
+    }
+
+    .param-row {
+      display:flex;
+      align-items:center;
+      margin-bottom:11px;
+      gap:10px;
+    }
+    .param-name {
+      font-size:0.52rem;
+      letter-spacing:0.2em;
+      color:var(--muted);
+      min-width:72px;
+    }
+    .param-name.warp { color:var(--warp-col); }
+
+    .param-bar-bg {
+      flex:1;
+      height:3px;
+      background:rgba(255,255,255,0.05);
+      position:relative;
+      border-radius:2px;
+    }
+    .param-bar-fill {
+      height:100%;
+      border-radius:2px;
+      width:0%;
+      transition:width 0.3s ease;
+      background: linear-gradient(90deg, var(--accent), var(--accent2));
+    }
+    .param-bar-fill.warp {
+      background: linear-gradient(90deg, #cc44ff, var(--warp-col));
+    }
+
+    .param-val {
+      font-size:0.5rem;
+      color:var(--text);
+      min-width:28px;
+      text-align:right;
+    }
+
+    /* ── 中央: ビジュアライザー ── */
+    #center {
+      flex:1;
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      justify-content:center;
+      padding:0 260px 0 260px;
+    }
+
+    #warp-display {
+      position:relative;
+      width:clamp(180px,30vw,280px);
+      height:clamp(180px,30vw,280px);
+      margin-bottom:32px;
+    }
+    #warp-canvas {
+      width:100%;
+      height:100%;
+    }
+
+    .field-label {
+      font-family:'Outfit',sans-serif;
+      font-weight:100;
+      font-size:clamp(0.8rem,2vw,1.1rem);
+      letter-spacing:0.3em;
+      color:#8888cc;
+      text-align:center;
+      margin-bottom:6px;
+    }
+    .warp-value {
+      font-size:clamp(2rem,6vw,3.5rem);
+      font-family:'Outfit',sans-serif;
+      font-weight:100;
+      color:var(--warp-col);
+      text-align:center;
+      letter-spacing:0.05em;
+      text-shadow:0 0 40px rgba(255,68,170,0.4);
+      transition:text-shadow 0.5s ease;
+    }
+
+    /* ── 右パネル: GPS・地図 ── */
+    #panel-right {
+      position:fixed;
+      top:0; right:0;
+      width:260px;
+      height:100vh;
+      padding:24px 20px;
+      background:linear-gradient(to left, rgba(6,6,8,0.95), rgba(6,6,8,0.6));
+      border-left:1px solid var(--border);
+      display:flex;
+      flex-direction:column;
+    }
+
+    .gps-status {
+      margin-bottom:20px;
+      padding-bottom:14px;
+      border-bottom:1px solid var(--border);
+    }
+    .gps-label {
+      font-size:0.55rem;
+      letter-spacing:0.35em;
+      color:var(--muted);
+      text-transform:uppercase;
+      margin-bottom:10px;
+    }
+    .gps-acc {
+      font-size:0.6rem;
+      letter-spacing:0.1em;
+    }
+    .gps-acc.excellent { color:var(--good); }
+    .gps-acc.good      { color:var(--good); opacity:0.7; }
+    .gps-acc.fair      { color:var(--warn); }
+    .gps-acc.poor      { color:var(--bad); opacity:0.7; }
+    .gps-acc.unavailable { color:var(--bad); }
+    .gps-acc.virtual   { color:var(--accent2); }
+
+    .gps-coords {
+      font-size:0.5rem;
+      color:var(--muted);
+      margin-top:4px;
+      line-height:1.7;
+    }
+
+    /* 仮想地図 */
+    #virtual-map-container {
+      flex:1;
+      display:flex;
+      flex-direction:column;
+    }
+    .map-label {
+      font-size:0.52rem;
+      letter-spacing:0.25em;
+      color:var(--muted);
+      margin-bottom:10px;
+      text-transform:uppercase;
+    }
+    #virtual-map {
+      flex:1;
+      max-height:220px;
+      border:1px solid var(--border);
+      background:rgba(255,255,255,0.02);
+      cursor:crosshair;
+      position:relative;
+      border-radius:2px;
+    }
+    #map-canvas { width:100%; height:100%; display:block; }
+    .map-hint {
+      font-size:0.48rem;
+      color:var(--muted);
+      margin-top:8px;
+      line-height:1.7;
+    }
+
+    /* モード切り替えボタン */
+    .mode-toggle {
+      margin-top:16px;
+      display:flex;
+      gap:8px;
+    }
+    .toggle-btn {
+      flex:1;
+      padding:8px 0;
+      border:1px solid var(--border);
+      background:transparent;
+      color:var(--muted);
+      font-family:'Space Mono',monospace;
+      font-size:0.5rem;
+      letter-spacing:0.15em;
+      cursor:pointer;
+      transition:all 0.25s;
+      text-transform:uppercase;
+    }
+    .toggle-btn.active {
+      border-color:var(--accent);
+      color:var(--accent);
+      background:rgba(119,102,255,0.08);
+    }
+    .toggle-btn:hover:not(.active) {
+      border-color:rgba(255,255,255,0.15);
+      color:var(--text);
+    }
+
+    /* ── ボトムバー ── */
+    #bottom-bar {
+      position:fixed;
+      bottom:0; left:260px; right:260px;
+      padding:12px 24px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      background:rgba(6,6,8,0.85);
+      border-top:1px solid var(--border);
+      font-size:0.5rem;
+      letter-spacing:0.15em;
+      color:var(--muted);
+    }
+    #status-text { color:var(--accent); }
+
+    /* ── アニメーション ── */
+    @keyframes pulse-ring {
+      0%   { transform:scale(0.95); opacity:0.7; }
+      50%  { transform:scale(1.05); opacity:1;   }
+      100% { transform:scale(0.95); opacity:0.7; }
+    }
+    .pulse-anim { animation:pulse-ring 3s ease-in-out infinite; }
+
+    /* スクロールバー非表示 */
+    ::-webkit-scrollbar { display:none; }
+  </style>
+</head>
+<body>
+
+<!-- ══════════════════════════════════════
+     スタート画面
+══════════════════════════════════════ -->
+<div id="start-screen">
+  <p class="start-title">C A D S</p>
+  <p class="start-sub">Continuous Acoustic Dimension System</p>
+
+  <div class="start-modes">
+    <div class="mode-card gps" id="btn-gps">
+      <span class="mode-icon">📡</span>
+      <span class="mode-label">GPS MODE</span>
+      <span class="mode-desc">実際の位置情報で<br>空間を変形させる</span>
+    </div>
+    <div class="mode-card virt" id="btn-virtual">
+      <span class="mode-icon">🗺</span>
+      <span class="mode-label">VIRTUAL MODE</span>
+      <span class="mode-desc">地図をクリックして<br>仮想的に移動する</span>
+    </div>
+  </div>
+
+  <p class="start-note">
+    音が存在する空間の性質が、あなたの位置によって連続的に変形します。<br>
+    境界は存在しません。
+  </p>
+</div>
+
+<!-- ══════════════════════════════════════
+     メイン画面
+══════════════════════════════════════ -->
+<div id="main">
+
+  <!-- 左: SpaceField パラメーター -->
+  <div id="panel-left">
+    <div class="panel-title">Space Field</div>
+    <!-- JS で動的生成 -->
+  </div>
+
+  <!-- 中央: Warpビジュアライザー -->
+  <div id="center">
+    <div id="warp-display">
+      <canvas id="warp-canvas"></canvas>
+    </div>
+    <div class="field-label">WARP</div>
+    <div class="warp-value" id="warp-num">0.00</div>
+  </div>
+
+  <!-- 右: GPS・地図 -->
+  <div id="panel-right">
+    <div class="gps-status">
+      <div class="gps-label">Position</div>
+      <div class="gps-acc" id="gps-acc-label">—</div>
+      <div class="gps-coords" id="gps-coords">x: 0.0m&nbsp;&nbsp;y: 0.0m</div>
+    </div>
+
+    <div id="virtual-map-container">
+      <div class="map-label">Acoustic Field Map</div>
+      <div id="virtual-map">
+        <canvas id="map-canvas"></canvas>
+      </div>
+      <p class="map-hint" id="map-hint">クリックで移動</p>
+    </div>
+
+    <div class="mode-toggle">
+      <button class="toggle-btn" id="toggle-gps">GPS</button>
+      <button class="toggle-btn active" id="toggle-virt">VIRTUAL</button>
+    </div>
+  </div>
+
+  <!-- ボトムバー -->
+  <div id="bottom-bar">
+    <span id="status-text">INITIALIZING...</span>
+    <span>CADS v1.0 — GPS → SpaceField → DSP</span>
+  </div>
+</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "./js/noise.js":       "./js/noise.js",
+    "./js/SpaceField.js":  "./js/SpaceField.js",
+    "./js/GeoLocator.js":  "./js/GeoLocator.js",
+    "./js/FieldMapper.js": "./js/FieldMapper.js",
+    "./js/AudioEngine.js": "./js/AudioEngine.js",
+    "./js/SoundSources.js":"./js/SoundSources.js",
+    "./js/CADS.js":        "./js/CADS.js"
+  }
+}
+</script>
+
+<script type="module">
+import { CADS }       from './js/CADS.js';
+import { SpaceField } from './js/SpaceField.js';
+
+// ──────────────────────────────────────
+// 要素取得
+// ──────────────────────────────────────
+const startScreen  = document.getElementById('start-screen');
+const mainEl       = document.getElementById('main');
+const btnGPS       = document.getElementById('btn-gps');
+const btnVirtual   = document.getElementById('btn-virtual');
+const panelLeft    = document.getElementById('panel-left');
+const warpCanvas   = document.getElementById('warp-canvas');
+const warpNum      = document.getElementById('warp-num');
+const gpsAccLabel  = document.getElementById('gps-acc-label');
+const gpsCoordsEl  = document.getElementById('gps-coords');
+const statusText   = document.getElementById('status-text');
+const mapCanvas    = document.getElementById('map-canvas');
+const toggleGPS    = document.getElementById('toggle-gps');
+const toggleVirt   = document.getElementById('toggle-virt');
+const mapHint      = document.getElementById('map-hint');
+
+// ──────────────────────────────────────
+// SpaceField パラメータUI を動的構築
+// ──────────────────────────────────────
+const paramBars = {};
+
+{
+  const title = panelLeft.querySelector('.panel-title');
+  for (const key of SpaceField.KEYS) {
+    const row = document.createElement('div');
+    row.className = 'param-row';
+
+    const nameEl = document.createElement('div');
+    nameEl.className = 'param-name' + (key === 'warp' ? ' warp' : '');
+
+    const tmp = new SpaceField();
+    nameEl.textContent = tmp.label(key);
+
+    const bgEl = document.createElement('div');
+    bgEl.className = 'param-bar-bg';
+
+    const fillEl = document.createElement('div');
+    fillEl.className = 'param-bar-fill' + (key === 'warp' ? ' warp' : '');
+    bgEl.appendChild(fillEl);
+
+    const valEl = document.createElement('div');
+    valEl.className = 'param-val';
+    valEl.textContent = '0.00';
+
+    row.appendChild(nameEl);
+    row.appendChild(bgEl);
+    row.appendChild(valEl);
+    panelLeft.appendChild(row);
+
+    paramBars[key] = { fill: fillEl, val: valEl };
+  }
+}
+
+// ──────────────────────────────────────
+// Warp ビジュアライザー
+// ──────────────────────────────────────
+const wCtx = warpCanvas.getContext('2d');
+let warpSize = 0;
+
+function resizeWarpCanvas() {
+  const container = document.getElementById('warp-display');
+  const size = Math.min(container.offsetWidth, container.offsetHeight);
+  warpSize = size;
+  warpCanvas.width  = size * window.devicePixelRatio;
+  warpCanvas.height = size * window.devicePixelRatio;
+  wCtx.scale(window.devicePixelRatio, window.devicePixelRatio);
+}
+resizeWarpCanvas();
+
+let warpPhase = 0;
+
+// ──────────────────────────────────────
+// 疑似3D空間グリッド
+// 「3D/2D」はもともと視覚（透視図法）から生まれた区分。
+// localization=1 で消失点のある透視グリッド（3D）、
+// localization=0 で消失点のない平行投影グリッド（2D）に連続的にモーフィングする。
+// さらに各行の陰影方向をわざと交互反転させ、脳が奥行きを一意に確定できない
+// 「エッシャー的」な曖昧さを作る。
+// ──────────────────────────────────────
+function drawPseudo3DGrid(field, s) {
+  const loc  = field.localization;
+  const warpVal = field.warp;
+  const cx = s / 2;
+  const vanishY = s * 0.18; // 3D時の消失点のY座標
+
+  const rows = 9;
+  const rowYs = [];
+  for (let i = 0; i <= rows; i++) {
+    const t = i / rows; // 0=奥, 1=手前
+    const y2D = t * s;
+    const y3D = vanishY + (s - vanishY) * Math.pow(t, 2.3);
+    let y = y2D * (1 - loc) + y3D * loc;
+    // Warpで奥行き自体を揺らす（境界をさらに滲ませる）
+    y += Math.sin(warpPhase * 0.6 + i * 0.9) * warpVal * s * 0.02;
+    rowYs.push(y);
+  }
+
+  // 陰影方向を行ごとに反転させる曖昧シェーディング
+  for (let i = 0; i < rows; i++) {
+    const t = (i + 0.5) / rows;
+    const halfW2D = s * 0.46;
+    const halfW3D = s * 0.46 * Math.pow(t, 1.4);
+    const halfW = halfW2D * (1 - loc) + halfW3D * loc;
+
+    const y0 = rowYs[i], y1 = rowYs[i + 1];
+    const flip = (i % 2 === 0) ? 1 : -1; // 陰影方向を交互反転 → 奥行きの一意性を壊す
+    const bandAlpha = 0.02 + 0.05 * loc + warpVal * 0.03;
+
+    const grad = wCtx.createLinearGradient(0, y0, 0, y1);
+    grad.addColorStop(flip > 0 ? 0 : 1, `rgba(140,120,255,${bandAlpha + 0.03})`);
+    grad.addColorStop(flip > 0 ? 1 : 0, `rgba(140,120,255,0)`);
+    wCtx.fillStyle = grad;
+    wCtx.fillRect(cx - halfW, y0, halfW * 2, y1 - y0);
+  }
+
+  // 横線（各行の境界）
+  wCtx.lineWidth = 1;
+  for (let i = 0; i <= rows; i++) {
+    const t = i / rows;
+    const halfW2D = s * 0.46;
+    const halfW3D = s * 0.46 * Math.pow(t, 1.4);
+    const halfW = halfW2D * (1 - loc) + halfW3D * loc;
+    const y = rowYs[i];
+
+    wCtx.strokeStyle = `rgba(180,170,255,${0.06 + 0.1 * loc})`;
+    wCtx.beginPath();
+    wCtx.moveTo(cx - halfW, y);
+    wCtx.lineTo(cx + halfW, y);
+    wCtx.stroke();
+  }
+
+  // 縦線（3Dでは消失点へ収束、2Dでは完全平行）
+  const cols = 8;
+  for (let c = 0; c <= cols; c++) {
+    const u = c / cols - 0.5; // -0.5..0.5
+    const xBottom2D = cx + u * s * 0.92;
+    const xTop2D    = cx + u * s * 0.92;
+    const xBottom3D = cx + u * s * 0.92;
+    const xTop3D    = cx; // 消失点に収束
+
+    const xBottom = xBottom2D * (1 - loc) + xBottom3D * loc;
+    const xTop    = xTop2D    * (1 - loc) + xTop3D    * loc;
+
+    wCtx.strokeStyle = `rgba(180,170,255,${0.05 + 0.08 * loc})`;
+    wCtx.beginPath();
+    wCtx.moveTo(xTop + Math.sin(warpPhase + c) * warpVal * s * 0.015, rowYs[0]);
+    wCtx.lineTo(xBottom, rowYs[rows]);
+    wCtx.stroke();
+  }
+}
+
+function drawWarp(field) {
+  const warpVal = field.warp;
+  warpPhase += 0.012 + warpVal * 0.04;
+  const s = warpSize;
+  wCtx.clearRect(0, 0, s, s);
+
+  drawPseudo3DGrid(field, s);
+
+  const cx = s / 2, cy = s / 2;
+  const r  = s * 0.38;
+
+  // 複数のリング
+  const rings = 6;
+  for (let ri = 0; ri < rings; ri++) {
+    const ringR = r * (0.3 + ri * 0.14);
+    const segments = 64;
+    const alpha = 0.05 + warpVal * 0.2 + ri * 0.02;
+    const hue = 260 + ri * 20 + warpVal * 60;
+
+    wCtx.beginPath();
+    for (let i = 0; i <= segments; i++) {
+      const t = (i / segments) * Math.PI * 2;
+      // Warp で変形した円
+      const distort = Math.sin(t * (2 + ri) + warpPhase + ri * 0.7) * warpVal * ringR * 0.35;
+      const distort2 = Math.cos(t * (3 + ri) - warpPhase * 1.3) * warpVal * ringR * 0.2;
+      const px = cx + (ringR + distort) * Math.cos(t);
+      const py = cy + (ringR + distort2) * Math.sin(t);
+      i === 0 ? wCtx.moveTo(px, py) : wCtx.lineTo(px, py);
+    }
+    wCtx.closePath();
+    wCtx.strokeStyle = `hsla(${hue}, 80%, 65%, ${alpha + 0.12})`;
+    wCtx.lineWidth = 1 + warpVal * 1.5;
+    wCtx.stroke();
+  }
+
+  // 中央の点
+  const dotR = 3 + warpVal * 8;
+  const grad = wCtx.createRadialGradient(cx, cy, 0, cx, cy, dotR * 3);
+  grad.addColorStop(0, `rgba(255, 80, 200, ${0.6 + warpVal * 0.4})`);
+  grad.addColorStop(1, 'rgba(255, 80, 200, 0)');
+  wCtx.beginPath();
+  wCtx.arc(cx, cy, dotR * 3, 0, Math.PI * 2);
+  wCtx.fillStyle = grad;
+  wCtx.fill();
+}
+
+// ──────────────────────────────────────
+// フィールドマップ（右パネル地図）
+// ──────────────────────────────────────
+const mCtx = mapCanvas.getContext('2d');
+const MAP_RANGE = 400; // ±200m 表示
+let virtualX = 0, virtualY = 0;
+
+function resizeMapCanvas() {
+  const container = document.getElementById('virtual-map');
+  mapCanvas.width  = container.offsetWidth  * window.devicePixelRatio;
+  mapCanvas.height = container.offsetHeight * window.devicePixelRatio;
+  mCtx.scale(window.devicePixelRatio, window.devicePixelRatio);
+}
+resizeMapCanvas();
+
+function drawMap(field, geoState) {
+  const w = mapCanvas.width  / window.devicePixelRatio;
+  const h = mapCanvas.height / window.devicePixelRatio;
+  mCtx.clearRect(0, 0, w, h);
+
+  // 背景グリッド
+  mCtx.strokeStyle = 'rgba(255,255,255,0.04)';
+  mCtx.lineWidth = 0.5;
+  const gridStep = w / 6;
+  for (let x = 0; x < w; x += gridStep) {
+    mCtx.beginPath(); mCtx.moveTo(x,0); mCtx.lineTo(x,h); mCtx.stroke();
+  }
+  for (let y = 0; y < h; y += gridStep) {
+    mCtx.beginPath(); mCtx.moveTo(0,y); mCtx.lineTo(w,y); mCtx.stroke();
+  }
+
+  // 現在位置のカーソル
+  const px = (geoState.x / MAP_RANGE + 0.5) * w;
+  const py = (1 - (geoState.y / MAP_RANGE + 0.5)) * h;
+
+  // パルス円（Warp強度で大きさ変化）
+  const pulseR = 6 + field.warp * 18;
+  const gradP = mCtx.createRadialGradient(px, py, 0, px, py, pulseR * 2);
+  gradP.addColorStop(0, `rgba(255, 68, 170, ${0.4 + field.warp * 0.4})`);
+  gradP.addColorStop(1, 'rgba(255, 68, 170, 0)');
+  mCtx.beginPath();
+  mCtx.arc(px, py, pulseR * 2, 0, Math.PI * 2);
+  mCtx.fillStyle = gradP;
+  mCtx.fill();
+
+  mCtx.beginPath();
+  mCtx.arc(px, py, 4, 0, Math.PI * 2);
+  mCtx.fillStyle = '#ff44aa';
+  mCtx.fill();
+
+  // 座標ラベル
+  mCtx.fillStyle = 'rgba(68,68,90,0.9)';
+  mCtx.font = `${8 * window.devicePixelRatio / window.devicePixelRatio}px "Space Mono"`;
+  mCtx.fillText(`${geoState.x.toFixed(0)}m`, px + 8, py - 4);
+}
+
+// 地図クリック → 仮想移動
+document.getElementById('virtual-map').addEventListener('click', (e) => {
+  if (!cads) return;
+  const rect = e.currentTarget.getBoundingClientRect();
+  const nx = (e.clientX - rect.left) / rect.width;
+  const ny = (e.clientY - rect.top)  / rect.height;
+  virtualX = (nx - 0.5) * MAP_RANGE;
+  virtualY = (0.5 - ny) * MAP_RANGE;
+
+  if (cads.virtualMode) {
+    cads.setVirtualPosition(virtualX, virtualY);
+  }
+});
+
+// ──────────────────────────────────────
+// UI 更新
+// ──────────────────────────────────────
+function updateUI(field, geoState) {
+  // パラメータバー
+  for (const key of SpaceField.KEYS) {
+    const v = field[key];
+    paramBars[key].fill.style.width = (v * 100).toFixed(1) + '%';
+    paramBars[key].val.textContent  = v.toFixed(2);
+  }
+
+  // Warp ビジュアライザー（疑似3Dグリッド + リング）
+  drawWarp(field);
+  warpNum.textContent = field.warp.toFixed(3);
+  const warpGlow = `0 0 ${20 + field.warp * 60}px rgba(255,68,170,${0.3 + field.warp * 0.6})`;
+  warpNum.style.textShadow = warpGlow;
+
+  // GPS ステータス
+  if (geoState.virtualMode) {
+    gpsAccLabel.className = 'gps-acc virtual';
+    gpsAccLabel.textContent = 'VIRTUAL MODE';
+  } else {
+    const cls = (geoState.accuracyLabel || 'UNAVAILABLE').toLowerCase();
+    gpsAccLabel.className = `gps-acc ${cls}`;
+    gpsAccLabel.textContent = geoState.accuracyLabel
+      + (geoState.accuracy < Infinity ? ` (±${geoState.accuracy.toFixed(0)}m)` : '');
+  }
+
+  gpsCoordsEl.textContent =
+    `x: ${geoState.x.toFixed(1)}m\u00a0\u00a0y: ${geoState.y.toFixed(1)}m`;
+
+  // フィールドマップ
+  drawMap(field, geoState);
+
+  // ステータステキスト
+  const dominant = SpaceField.KEYS.reduce((a, b) => field[a] > field[b] ? a : b);
+  statusText.textContent = `DOMINANT: ${new SpaceField().label(dominant)} ${(field[dominant]*100).toFixed(0)}%`;
+}
+
+// ──────────────────────────────────────
+// CADS インスタンス
+// ──────────────────────────────────────
+let cads = null;
+
+function launchCADS(useVirtual) {
+  startScreen.classList.add('fade-out');
+  setTimeout(() => { startScreen.style.display = 'none'; }, 1200);
+  mainEl.classList.add('active');
+
+  // #main は今 display:flex になったので、ここで初めてコンテナに実サイズが付く。
+  // 開始画面が出ていた間の resize 呼び出しは幅0で失敗していたため、再計算が必要。
+  requestAnimationFrame(() => {
+    resizeWarpCanvas();
+    resizeMapCanvas();
+  });
+
+  cads = new CADS();
+  cads.onFieldUpdate = updateUI;
+
+  if (useVirtual) {
+    cads.enableVirtualMode();
+    toggleVirt.classList.add('active');
+    toggleGPS.classList.remove('active');
+  } else {
+    cads.enableGPSMode();
+    toggleGPS.classList.add('active');
+    toggleVirt.classList.remove('active');
+  }
+
+  cads.start();
+  statusText.textContent = 'ACTIVE — SPATIAL ACOUSTIC ENGINE RUNNING';
+}
+
+btnGPS.addEventListener('click',     () => launchCADS(false));
+btnVirtual.addEventListener('click', () => launchCADS(true));
+
+// モード切り替えボタン
+toggleGPS.addEventListener('click', () => {
+  if (!cads || !cads.virtualMode) return;
+  cads.enableGPSMode();
+  toggleGPS.classList.add('active');
+  toggleVirt.classList.remove('active');
+  mapHint.textContent = '実際のGPS位置を使用中';
+});
+
+toggleVirt.addEventListener('click', () => {
+  if (!cads || cads.virtualMode) return;
+  cads.enableVirtualMode();
+  cads.setVirtualPosition(virtualX, virtualY);
+  toggleVirt.classList.add('active');
+  toggleGPS.classList.remove('active');
+  mapHint.textContent = 'クリックで移動';
+});
+
+// リサイズ
+window.addEventListener('resize', () => {
+  resizeWarpCanvas();
+  resizeMapCanvas();
+});
+</script>
+</body>
+</html>
